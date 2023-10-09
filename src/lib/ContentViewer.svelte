@@ -3,52 +3,45 @@
 	import { Readability, isProbablyReaderable } from '@mozilla/readability';
 	import { parseHTML } from 'linkedom';
 	import { ndkStore } from '$lib/ndk';
-	import { selection, range } from '$lib/store';
+	import {
+		selection,
+		range,
+		highlightEvents,
+		quoteEvents,
+		selectedHighlight,
+		searchInput
+	} from '$lib/store';
+
+	export let htmlText;
+	export let url;
+	$: console.log($selectedHighlight);
+	$: console.log($searchInput);
 
 	onMount(() => {
 		// Once the component is mounted, we can access the document:
 		document.addEventListener(`selectionchange`, () => {
-			// const div = document.querySelector('*');
 			const selected = window.getSelection();
-			selection.set(selected);
-			console.log($selection);
-			range.set($selection.getRangeAt(0));
-			console.log('range', $range);
+			if (selected?.toString().length) {
+				selection.set(selected);
+				range.set($selection.getRangeAt(0));
+			}
 		});
 	});
 
-	function escape(regex) {
-		return regex.replace(/([()[{*+.$^\\|?])/g, '\\$1');
-	}
 	/**
 	 * @param {DOM} innerHTML
 	 * @param {NDKHighlight} highlightEvent
 	 * @returns {DOM}
 	 */
 	function addHighlights(innerHTML, highlightEvent) {
-		// TODO improve with pablos approach in "MarkedContent.svelte"
+		// if (highlightEvent.content.startsWith('vom')) {
+		// 	console.log('skipping');
+		// 	return innerHTML;
+		// }
 		const words = highlightEvent.content.split(/[ ]+/).filter((w) => w.length > 0);
-		// find the first word
-		const N = 3;
-		const firstNWords = words.slice(0, N);
-		const lastNWords = words.slice(-N);
-
-		// Remove non-alphanumeric characters
-		const sanitizeWord = (w) => w.replace(/[^a-zA-Z0-9]/g, '.*');
-		const firstNWordsSanitized = firstNWords.map(sanitizeWord);
-		const lastNWordsSanitized = lastNWords.map(sanitizeWord);
-		// Create a regex pattern that matches the first and last N words with any characters in between
-		const pattern = firstNWordsSanitized.join(' ') + '[^]*?' + lastNWordsSanitized.join('[^]*?');
-
-		// Create a RegExp object from the pattern
-		console.log({ pattern });
-		// create a pattern that includes everything in between
-
-		const escapedContent = escape(highlightEvent.content);
-		const regex = new RegExp(escapedContent, 'gi'); // 'gi' for global and case-insensitive search
+		const regex = new RegExp(words.join('(\\s*<[\\w\\s=":\\/\\.-]*>| )+'));
 		const matches = innerHTML.match(regex);
 		if (matches) {
-			console.log(matches);
 			// Wrap matching text with <mark> elements
 			innerHTML = innerHTML.replace(regex, (match) => {
 				return `<mark id=${highlightEvent.id} data-highlight-id="${highlightEvent.id}">${match}</mark>`;
@@ -60,11 +53,8 @@
 	/**
 	 * @returns {ArticleObject}
 	 */
-	async function loadArticle() {
-		const url = 'https://www.e-teaching.org/praxis/hybride-lernraeume/asynchron-hybride-vorlesung';
-		const res = await fetch(url);
-		const html = await res.text();
-		const { document } = parseHTML(html);
+	async function loadArticle(htmlText) {
+		const { document } = parseHTML(htmlText);
 
 		// Check if the content is suitable for Readability
 		if (!isProbablyReaderable(document)) {
@@ -78,13 +68,22 @@
 	}
 
 	async function loadHighlights() {
-		const filter = {
+		const highlightsFilter = {
 			kinds: [9802],
-			'#r': ['https://www.e-teaching.org/praxis/hybride-lernraeume/asynchron-hybride-vorlesung']
+			'#r': [url]
 		};
-		const events = await $ndkStore.fetchEvents(filter);
-		console.log('highlight events', events);
-		return Array.from(events);
+		const hEvents = await $ndkStore.fetchEvents(highlightsFilter);
+		highlightEvents.set(Array.from(hEvents));
+		console.log('highlight events', $highlightEvents);
+
+		const eventIds = $highlightEvents.map((h) => h.id);
+		const quotesFilter = {
+			kinds: [1],
+			'#q': [...eventIds]
+		};
+		const qEvents = await $ndkStore.fetchEvents(quotesFilter);
+		quoteEvents.set(Array.from(qEvents));
+		console.log('qEvents', qEvents);
 	}
 
 	/**
@@ -100,34 +99,51 @@
 		return highlightedHTML;
 	}
 
-	async function loadHighlightedArticle() {
-		const article = await loadArticle();
-		const highlightEvents = await loadHighlights();
+	async function loadHighlightedArticle(htmlText) {
+		const { title, content } = await loadArticle(htmlText);
+		await loadHighlights();
 		// get the innerHTMLContent
-		const docInnerHTML = article.content;
-		const highlightedHTML = setHighlightsInHTML(docInnerHTML, highlightEvents);
+		const docInnerHTML = content;
+		const highlightedHTML = setHighlightsInHTML(docInnerHTML, $highlightEvents);
 		const highlightedDom = parseHTML(highlightedHTML);
-		return highlightedDom;
+		return { ...highlightedDom, title };
 	}
 	function handleClick(e) {
-		console.log('click event', e);
+		if (e.target.dataset.highlightId) {
+			selectedHighlight.set($highlightEvents.find((h) => h.id === e.target.dataset.highlightId));
+		}
 	}
 </script>
 
-<div class="border border-white">
-	{#await loadHighlightedArticle() then article}
+<div id="article" class="border border-white rounded-xl p-4">
+	{#await loadHighlightedArticle(htmlText) then article}
+		<h1>{article.title}</h1>
 		<!-- catch error if article is not reader friendly -->
-		<div on:click={handleClick} class="selection:bg-yellow-500 selection:text-black">
+		<div on:click={handleClick} class="selection:bg-orange-400 selection:text-slate-800">
 			{@html article.document}
 		</div>
+	{:catch error}
+		<p>{error.message}</p>
 	{/await}
 </div>
 
 <style lang="postcss">
-	:global(h1, h2) {
+	:global(#article h1, #article h2) {
 		font-weight: 800;
 		font-size: 1.75rem;
 		font-family: Montserrat, sans-serif;
 		margin-top: 1.5rem;
+	}
+	:global(#article a) {
+		text-decoration: underline;
+		font-weight: bold;
+	}
+	:global(#article mark, #selectionView mark) {
+		background-color: #fb923c;
+		color: #1e293b;
+	}
+	:global(#article mark:hover) {
+		background-color: #ea580c;
+		cursor: pointer;
 	}
 </style>

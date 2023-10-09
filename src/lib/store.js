@@ -6,5 +6,10 @@ export const selection = writable({})
 export const range = writable({})
 
 export const highlightedDocument = writable({
-  url: "https://www.e-teaching.org/praxis/hybride-lernraeume/asynchron-hybride-vorlesung"
+  url: "",
 })
+
+
+export const highlightEvents = writable([])
+export const quoteEvents = writable([])
+export const selectedHighlight = writable({})
