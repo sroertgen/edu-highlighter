@@ -16,7 +16,9 @@
 </script>
 
 <div class="mt-4">
-	{#await loadHighlightedContent() then resources}
+	{#await loadHighlightedContent()}
+		<span class="loading loading-spinner text-error" />
+	{:then resources}
 		<div class="grid grid-flow-col">
 			{#each resources as resource}
 				<div class="card w-96 bg-base-200 shadow-xl">
